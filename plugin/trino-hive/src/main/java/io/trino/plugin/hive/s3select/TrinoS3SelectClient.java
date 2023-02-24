@@ -17,6 +17,7 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.SelectObjectContentEventVisitor;
 import com.amazonaws.services.s3.model.SelectObjectContentRequest;
 import com.amazonaws.services.s3.model.SelectObjectContentResult;
+import io.trino.plugin.hive.s3.TrinoS3FileSystem;
 import org.apache.hadoop.conf.Configuration;
 
 import java.io.Closeable;
@@ -34,11 +35,11 @@ class TrinoS3SelectClient
     private SelectObjectContentRequest selectObjectRequest;
     private SelectObjectContentResult selectObjectContentResult;
 
-    public TrinoS3SelectClient(Configuration configuration, TrinoS3ClientFactory s3ClientFactory)
+    public TrinoS3SelectClient(Configuration configuration, TrinoS3FileSystem s3FileSystem)
     {
         requireNonNull(configuration, "configuration is null");
-        requireNonNull(s3ClientFactory, "s3ClientFactory is null");
-        this.s3Client = s3ClientFactory.getS3Client(configuration);
+        requireNonNull(s3FileSystem, "s3FileSystem is null");
+        this.s3Client = s3FileSystem.getS3Client();
     }
 
     public InputStream getRecordsContent(SelectObjectContentRequest selectObjectRequest)

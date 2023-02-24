@@ -72,6 +72,7 @@ public abstract class S3SelectLineRecordReader
     private long position;
     private LineReader reader;
     private boolean isFirstLine;
+    private URI uri;
     private static final Duration BACKOFF_MIN_SLEEP = new Duration(1, SECONDS);
     private final TrinoS3SelectClient selectClient;
     private final long start;
@@ -92,14 +93,12 @@ public abstract class S3SelectLineRecordReader
             long start,
             long length,
             Properties schema,
-            String ionSqlQuery,
-            TrinoS3ClientFactory s3ClientFactory)
+            String ionSqlQuery)
     {
         requireNonNull(configuration, "configuration is null");
         requireNonNull(schema, "schema is null");
         requireNonNull(path, "path is null");
         requireNonNull(ionSqlQuery, "ionSqlQuery is null");
-        requireNonNull(s3ClientFactory, "s3ClientFactory is null");
         this.lineDelimiter = (schema).getProperty(LINE_DELIM, "\n");
         this.processedRecords = 0;
         this.recordsFromS3 = 0;
@@ -117,9 +116,15 @@ public abstract class S3SelectLineRecordReader
         this.maxAttempts = configuration.getInt(S3_MAX_CLIENT_RETRIES, defaults.getS3MaxClientRetries()) + 1;
         this.maxBackoffTime = Duration.valueOf(configuration.get(S3_MAX_BACKOFF_TIME, defaults.getS3MaxBackoffTime().toString()));
         this.maxRetryTime = Duration.valueOf(configuration.get(S3_MAX_RETRY_TIME, defaults.getS3MaxRetryTime().toString()));
-
-        this.selectClient = new TrinoS3SelectClient(configuration, s3ClientFactory);
-        closer.register(selectClient);
+        try {
+            TrinoS3FileSystem s3FileSystem = new TrinoS3FileSystem();
+            s3FileSystem.initialize(this.uri, configuration);
+            this.selectClient = new TrinoS3SelectClient(configuration, s3FileSystem);
+            closer.register(selectClient);
+        }
+        catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     protected abstract InputSerialization buildInputSerialization();
@@ -142,6 +147,7 @@ public abstract class S3SelectLineRecordReader
     {
         SelectObjectContentRequest selectObjectRequest = new SelectObjectContentRequest();
         URI uri = path.toUri();
+        this.uri = uri;
         selectObjectRequest.setBucketName(TrinoS3FileSystem.extractBucketName(uri));
         selectObjectRequest.setKey(TrinoS3FileSystem.keyFromPath(path));
         selectObjectRequest.setExpression(query);

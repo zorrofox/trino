@@ -53,13 +53,13 @@ public class S3SelectRecordCursorProvider
         implements HiveRecordCursorProvider
 {
     private final HdfsEnvironment hdfsEnvironment;
-    private final TrinoS3ClientFactory s3ClientFactory;
+    //private final TrinoS3ClientFactory s3ClientFactory;
 
     @Inject
-    public S3SelectRecordCursorProvider(HdfsEnvironment hdfsEnvironment, TrinoS3ClientFactory s3ClientFactory)
+    public S3SelectRecordCursorProvider(HdfsEnvironment hdfsEnvironment)
     {
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
-        this.s3ClientFactory = requireNonNull(s3ClientFactory, "s3ClientFactory is null");
+        //this.s3ClientFactory = requireNonNull(s3ClientFactory, "s3ClientFactory is null");
     }
 
     @Override
@@ -108,7 +108,7 @@ public class S3SelectRecordCursorProvider
             IonSqlQueryBuilder queryBuilder = new IonSqlQueryBuilder(typeManager, s3SelectDataType);
             String ionSqlQuery = queryBuilder.buildSql(readerColumns, effectivePredicate);
             Optional<S3SelectLineRecordReader> recordReader = S3SelectLineRecordReaderProvider.get(configuration, path, start, length, schema,
-                    ionSqlQuery, s3ClientFactory, s3SelectDataType);
+                    ionSqlQuery, s3SelectDataType);
 
             if (recordReader.isEmpty()) {
                 // S3 Select data type is not mapped to an S3SelectLineRecordReader

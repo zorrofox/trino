@@ -19,7 +19,6 @@ import com.amazonaws.services.s3.model.CompressionType;
 import com.amazonaws.services.s3.model.InputSerialization;
 import com.amazonaws.services.s3.model.OutputSerialization;
 import io.trino.plugin.hive.s3select.S3SelectLineRecordReader;
-import io.trino.plugin.hive.s3select.TrinoS3ClientFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 
@@ -49,10 +48,9 @@ public class S3SelectCsvRecordReader
             long start,
             long length,
             Properties schema,
-            String ionSqlQuery,
-            TrinoS3ClientFactory s3ClientFactory)
+            String ionSqlQuery)
     {
-        super(configuration, path, start, length, schema, ionSqlQuery, s3ClientFactory);
+        super(configuration, path, start, length, schema, ionSqlQuery);
     }
 
     @Override

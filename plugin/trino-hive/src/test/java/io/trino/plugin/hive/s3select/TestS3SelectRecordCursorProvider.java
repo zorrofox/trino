@@ -17,7 +17,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.trino.hadoop.ConfigurationInstantiator;
 import io.trino.plugin.hive.HiveColumnHandle;
-import io.trino.plugin.hive.HiveConfig;
 import io.trino.plugin.hive.HiveRecordCursorProvider.ReaderRecordCursorWithProjections;
 import io.trino.plugin.hive.TestBackgroundHiveSplitLoader.TestingHdfsEnvironment;
 import io.trino.spi.predicate.Domain;
@@ -114,8 +113,7 @@ public class TestS3SelectRecordCursorProvider
                                                                                boolean s3SelectPushdownEnabled)
     {
         S3SelectRecordCursorProvider s3SelectRecordCursorProvider = new S3SelectRecordCursorProvider(
-                new TestingHdfsEnvironment(new ArrayList<>()),
-                new TrinoS3ClientFactory(new HiveConfig()));
+                new TestingHdfsEnvironment(new ArrayList<>()));
 
         return s3SelectRecordCursorProvider.createRecordCursor(
                 ConfigurationInstantiator.newEmptyConfiguration(),

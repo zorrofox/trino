@@ -43,7 +43,6 @@ import io.trino.plugin.hive.rubix.RubixEnabledConfig;
 import io.trino.plugin.hive.s3.HiveS3Config;
 import io.trino.plugin.hive.s3.TrinoS3ConfigurationInitializer;
 import io.trino.plugin.hive.s3select.S3SelectRecordCursorProvider;
-import io.trino.plugin.hive.s3select.TrinoS3ClientFactory;
 import io.trino.spi.PageSorter;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
@@ -197,7 +196,7 @@ public final class HiveTestUtils
 
     public static Set<HiveRecordCursorProvider> getDefaultHiveRecordCursorProviders(HiveConfig hiveConfig, HdfsEnvironment hdfsEnvironment)
     {
-        return ImmutableSet.of(new S3SelectRecordCursorProvider(hdfsEnvironment, new TrinoS3ClientFactory(hiveConfig)));
+        return ImmutableSet.of(new S3SelectRecordCursorProvider(hdfsEnvironment));
     }
 
     public static Set<HiveFileWriterFactory> getDefaultHiveFileWriterFactories(HiveConfig hiveConfig, HdfsEnvironment hdfsEnvironment)

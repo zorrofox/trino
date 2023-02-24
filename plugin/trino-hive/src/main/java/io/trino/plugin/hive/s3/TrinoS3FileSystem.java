@@ -1971,7 +1971,7 @@ public class TrinoS3FileSystem
     }
 
     @VisibleForTesting
-    AmazonS3 getS3Client()
+    public AmazonS3 getS3Client()
     {
         return s3;
     }
