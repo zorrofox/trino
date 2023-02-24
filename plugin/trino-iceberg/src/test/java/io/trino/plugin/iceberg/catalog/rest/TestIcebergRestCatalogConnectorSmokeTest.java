@@ -25,16 +25,20 @@ import org.apache.iceberg.rest.DelegatingRestSessionCatalog;
 import org.assertj.core.util.Files;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Optional;
 
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static io.trino.plugin.iceberg.catalog.rest.RestCatalogTestUtils.backendCatalog;
+import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TestIcebergRestCatalogConnectorSmokeTest
         extends BaseIcebergConnectorSmokeTest
 {
+    private File warehouseLocation;
+
     public TestIcebergRestCatalogConnectorSmokeTest()
     {
         super(new IcebergConfig().getFileFormat().toIceberg());
@@ -56,7 +60,7 @@ public class TestIcebergRestCatalogConnectorSmokeTest
     protected QueryRunner createQueryRunner()
             throws Exception
     {
-        File warehouseLocation = Files.newTemporaryFolder();
+        warehouseLocation = Files.newTemporaryFolder();
         closeAfterClass(() -> deleteRecursively(warehouseLocation.toPath(), ALLOW_INSECURE));
 
         Catalog backend = backendCatalog(warehouseLocation);
@@ -76,6 +80,7 @@ public class TestIcebergRestCatalogConnectorSmokeTest
                                 .put("iceberg.file-format", format.name())
                                 .put("iceberg.catalog.type", "rest")
                                 .put("iceberg.rest-catalog.uri", testServer.getBaseUrl().toString())
+                                .put("iceberg.register-table-procedure.enabled", "true")
                                 .buildOrThrow())
                 .setInitialTables(REQUIRED_TPCH_TABLES)
                 .build();
@@ -116,45 +121,50 @@ public class TestIcebergRestCatalogConnectorSmokeTest
     }
 
     @Override
+    protected String schemaPath()
+    {
+        return format("%s/%s", warehouseLocation, getSession().getSchema());
+    }
+
+    @Override
+    protected boolean locationExists(String location)
+    {
+        return java.nio.file.Files.exists(Path.of(location));
+    }
+
+    @Override
     public void testRegisterTableWithTableLocation()
     {
         assertThatThrownBy(super::testRegisterTableWithTableLocation)
-                .hasMessageContaining("register_table procedure is disabled");
+                .hasMessageContaining("registerTable is not supported for Iceberg REST catalog");
     }
 
     @Override
     public void testRegisterTableWithComments()
     {
         assertThatThrownBy(super::testRegisterTableWithComments)
-                .hasMessageContaining("register_table procedure is disabled");
+                .hasMessageContaining("registerTable is not supported for Iceberg REST catalog");
     }
 
     @Override
     public void testRegisterTableWithShowCreateTable()
     {
         assertThatThrownBy(super::testRegisterTableWithShowCreateTable)
-                .hasMessageContaining("register_table procedure is disabled");
+                .hasMessageContaining("registerTable is not supported for Iceberg REST catalog");
     }
 
     @Override
     public void testRegisterTableWithReInsert()
     {
         assertThatThrownBy(super::testRegisterTableWithReInsert)
-                .hasMessageContaining("register_table procedure is disabled");
-    }
-
-    @Override
-    public void testRegisterTableWithDroppedTable()
-    {
-        assertThatThrownBy(super::testRegisterTableWithDroppedTable)
-                .hasMessageContaining("register_table procedure is disabled");
+                .hasMessageContaining("registerTable is not supported for Iceberg REST catalog");
     }
 
     @Override
     public void testRegisterTableWithDifferentTableName()
     {
         assertThatThrownBy(super::testRegisterTableWithDifferentTableName)
-                .hasMessageContaining("register_table procedure is disabled");
+                .hasMessageContaining("registerTable is not supported for Iceberg REST catalog");
     }
 
     @Override
@@ -162,5 +172,39 @@ public class TestIcebergRestCatalogConnectorSmokeTest
     {
         assertThatThrownBy(super::testRegisterTableWithMetadataFile)
                 .hasMessageContaining("metadata location for register_table is not supported");
+    }
+
+    @Override
+    public void testUnregisterTable()
+    {
+        assertThatThrownBy(super::testUnregisterTable)
+                .hasMessageContaining("unregisterTable is not supported for Iceberg REST catalogs");
+    }
+
+    @Override
+    public void testUnregisterBrokenTable()
+    {
+        assertThatThrownBy(super::testUnregisterBrokenTable)
+                .hasMessageContaining("unregisterTable is not supported for Iceberg REST catalogs");
+    }
+
+    @Override
+    public void testUnregisterTableNotExistingTable()
+    {
+        assertThatThrownBy(super::testUnregisterTableNotExistingTable)
+                .hasMessageContaining("unregisterTable is not supported for Iceberg REST catalogs");
+    }
+
+    @Override
+    public void testRepeatUnregisterTable()
+    {
+        assertThatThrownBy(super::testRepeatUnregisterTable)
+                .hasMessageContaining("unregisterTable is not supported for Iceberg REST catalogs");
+    }
+
+    @Override
+    protected void deleteDirectory(String location)
+    {
+        // used when unregistering a table, which is not supported by the REST catalog
     }
 }

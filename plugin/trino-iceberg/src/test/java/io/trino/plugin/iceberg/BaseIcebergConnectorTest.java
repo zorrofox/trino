@@ -181,9 +181,6 @@ public abstract class BaseIcebergConnectorTest
             case SUPPORTS_COMMENT_ON_VIEW_COLUMN:
                 return true;
 
-            case SUPPORTS_SET_COLUMN_TYPE:
-                return false;
-
             case SUPPORTS_CREATE_VIEW:
                 return true;
 
@@ -1218,7 +1215,19 @@ public abstract class BaseIcebergConnectorTest
         assertUpdate("CREATE TABLE " + tableName + " (id INTEGER, name VARCHAR, age INTEGER) WITH (partitioning = ARRAY['id', 'truncate(name, 5)', 'void(age)'])");
         assertQueryFails("ALTER TABLE " + tableName + " DROP COLUMN id", "Cannot drop partition field: id");
         assertQueryFails("ALTER TABLE " + tableName + " DROP COLUMN name", "Cannot drop partition field: name");
-        assertUpdate("ALTER TABLE " + tableName + " DROP COLUMN age");
+        assertQueryFails("ALTER TABLE " + tableName + " DROP COLUMN age", "Cannot drop partition field: age");
+        dropTable(tableName);
+    }
+
+    @Test
+    public void testDropColumnUsedInOlderPartitionSpecs()
+    {
+        String tableName = "test_drop_partition_column_" + randomNameSuffix();
+        assertUpdate("CREATE TABLE " + tableName + " (id INTEGER, name VARCHAR, age INTEGER) WITH (partitioning = ARRAY['id', 'truncate(name, 5)', 'void(age)'])");
+        assertUpdate("ALTER TABLE " + tableName + " SET PROPERTIES partitioning = ARRAY[]");
+        assertQueryFails("ALTER TABLE " + tableName + " DROP COLUMN id", "Cannot drop column which is used by an old partition spec: id");
+        assertQueryFails("ALTER TABLE " + tableName + " DROP COLUMN name", "Cannot drop column which is used by an old partition spec: name");
+        assertQueryFails("ALTER TABLE " + tableName + " DROP COLUMN age", "Cannot drop column which is used by an old partition spec: age");
         dropTable(tableName);
     }
 
@@ -4425,11 +4434,13 @@ public abstract class BaseIcebergConnectorTest
         if (expectedSplitCount > 0) {
             assertThat(operatorStats.getTotalDrivers()).isEqualTo(expectedSplitCount);
             assertThat(operatorStats.getPhysicalInputPositions()).isGreaterThan(0);
+            assertThat(operatorStats.getPhysicalInputReadTime().getValue()).isGreaterThan(0);
         }
         else {
             // expectedSplitCount == 0
             assertThat(operatorStats.getTotalDrivers()).isEqualTo(1);
             assertThat(operatorStats.getPhysicalInputPositions()).isEqualTo(0);
+            assertThat(operatorStats.getPhysicalInputReadTime().toMillis()).isEqualTo(0);
         }
     }
 
@@ -5034,6 +5045,21 @@ public abstract class BaseIcebergConnectorTest
         assertUpdate("CREATE TABLE test_iceberg_recreate (a_varchar) AS VALUES ('Trino')", 1);
         assertThat(query("SELECT min(a_varchar) FROM test_iceberg_recreate")).matches("VALUES CAST('Trino' AS varchar)");
         dropTable("test_iceberg_recreate");
+    }
+
+    @Test
+    public void testDropTableDeleteData()
+    {
+        String tableName = "test_drop_table_delete_data" + randomNameSuffix();
+        assertUpdate("CREATE TABLE " + tableName + " (a_int) AS VALUES (1)", 1);
+        String tableLocation = getTableLocation(tableName);
+        assertUpdate("DROP TABLE " + tableName);
+
+        // Create a new table with the same location to verify the data was deleted in the above DROP TABLE
+        assertUpdate("CREATE TABLE " + tableName + "(a_int INTEGER) WITH (location = '" + tableLocation + "')");
+        assertQueryReturnsEmptyResult("SELECT * FROM " + tableName);
+
+        assertUpdate("DROP TABLE " + tableName);
     }
 
     @Test
@@ -5947,7 +5973,7 @@ public abstract class BaseIcebergConnectorTest
     }
 
     @Test(dataProvider = "partitionedAndBucketedProvider")
-    public void testMergeUpdateWithVariousLayouts(int writers, String partioning)
+    public void testMergeUpdateWithVariousLayouts(int writers, String partitioning)
     {
         Session session = Session.builder(getSession())
                 .setSystemProperty(TASK_WRITER_COUNT, String.valueOf(writers))
@@ -5955,7 +5981,7 @@ public abstract class BaseIcebergConnectorTest
 
         String targetTable = "merge_formats_target_" + randomNameSuffix();
         String sourceTable = "merge_formats_source_" + randomNameSuffix();
-        assertUpdate(format("CREATE TABLE %s (customer VARCHAR, purchase VARCHAR) %s", targetTable, partioning));
+        assertUpdate(format("CREATE TABLE %s (customer VARCHAR, purchase VARCHAR) %s", targetTable, partitioning));
 
         assertUpdate(format("INSERT INTO %s (customer, purchase) VALUES ('Dave', 'dates'), ('Lou', 'limes'), ('Carol', 'candles')", targetTable), 3);
         assertQuery("SELECT * FROM " + targetTable, "VALUES ('Dave', 'dates'), ('Lou', 'limes'), ('Carol', 'candles')");
@@ -6310,10 +6336,83 @@ public abstract class BaseIcebergConnectorTest
         return OptionalInt.of(255 - 33);
     }
 
+    @Test
+    public void testSetPartitionedColumnType()
+    {
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_set_partitioned_column_type_", "WITH (partitioning = ARRAY['part']) AS SELECT 1 AS id, CAST(123 AS integer) AS part")) {
+            assertUpdate("ALTER TABLE " + table.getName() + " ALTER COLUMN part SET DATA TYPE bigint");
+
+            assertThat(query("SELECT part FROM " + table.getName()))
+                    .matches("VALUES bigint '123'");
+            assertThat(query("SELECT id FROM " + table.getName() + " WHERE part = 123"))
+                    .isFullyPushedDown();
+            assertThat((String) computeScalar("SHOW CREATE TABLE " + table.getName()))
+                    .contains("partitioning = ARRAY['part']");
+        }
+    }
+
+    @Test
+    public void testSetTransformPartitionedColumnType()
+    {
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_set_partitioned_column_type_", "WITH (partitioning = ARRAY['bucket(part, 10)']) AS SELECT CAST(123 AS integer) AS part")) {
+            assertUpdate("ALTER TABLE " + table.getName() + " ALTER COLUMN part SET DATA TYPE bigint");
+
+            assertThat(query("SELECT * FROM " + table.getName()))
+                    .matches("VALUES bigint '123'");
+            assertThat((String) computeScalar("SHOW CREATE TABLE " + table.getName()))
+                    .contains("partitioning = ARRAY['bucket(part, 10)']");
+        }
+    }
+
+    @Test
+    public void testAlterTableWithUnsupportedProperties()
+    {
+        String tableName = "test_alter_table_with_unsupported_properties_" + randomNameSuffix();
+
+        assertUpdate("CREATE TABLE " + tableName + " (a bigint)");
+
+        assertQueryFails("ALTER TABLE " + tableName + " SET PROPERTIES orc_bloom_filter_columns = ARRAY['a']",
+                "The following properties cannot be updated: orc_bloom_filter_columns");
+        assertQueryFails("ALTER TABLE " + tableName + " SET PROPERTIES location = '/var/data/table/', orc_bloom_filter_fpp = 0.5",
+                "The following properties cannot be updated: location, orc_bloom_filter_fpp");
+        assertQueryFails("ALTER TABLE " + tableName + " SET PROPERTIES format = 'ORC', orc_bloom_filter_columns = ARRAY['a']",
+                "The following properties cannot be updated: orc_bloom_filter_columns");
+
+        assertUpdate("DROP TABLE " + tableName);
+    }
+
     @Override
     protected void verifyTableNameLengthFailurePermissible(Throwable e)
     {
         assertThat(e).hasMessageMatching("Failed to create file.*|Could not create new table directory");
+    }
+
+    @Override
+    protected Optional<SetColumnTypeSetup> filterSetColumnTypesDataProvider(SetColumnTypeSetup setup)
+    {
+        switch ("%s -> %s".formatted(setup.sourceColumnType(), setup.newColumnType())) {
+            case "bigint -> integer":
+            case "decimal(5,3) -> decimal(5,2)":
+            case "varchar -> char(20)":
+            case "array(integer) -> array(bigint)":
+                // Iceberg allows updating column types if the update is safe. Safe updates are:
+                // - int to bigint
+                // - float to double
+                // - decimal(P,S) to decimal(P2,S) when P2 > P (scale cannot change)
+                // https://iceberg.apache.org/docs/latest/spark-ddl/#alter-table--alter-column
+                return Optional.of(setup.asUnsupported());
+
+            case "varchar(100) -> varchar(50)":
+                // Iceberg connector ignores the varchar length
+                return Optional.empty();
+        }
+        return Optional.of(setup);
+    }
+
+    @Override
+    protected void verifySetColumnTypeFailurePermissible(Throwable e)
+    {
+        assertThat(e).hasMessageMatching(".*(Cannot change column type|not supported for Iceberg|Not a primitive type|Cannot change type ).*");
     }
 
     private Session prepareCleanUpSession()

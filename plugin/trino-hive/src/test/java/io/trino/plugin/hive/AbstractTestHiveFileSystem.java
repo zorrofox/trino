@@ -200,6 +200,7 @@ public abstract class AbstractTestHiveFileSystem
                 config,
                 new HiveMetastoreConfig(),
                 HiveMetastoreFactory.ofInstance(metastoreClient),
+                new HdfsFileSystemFactory(hdfsEnvironment),
                 hdfsEnvironment,
                 hivePartitionManager,
                 newDirectExecutorService(),
@@ -222,6 +223,7 @@ public abstract class AbstractTestHiveFileSystem
         splitManager = new HiveSplitManager(
                 transactionManager,
                 hivePartitionManager,
+                new HdfsFileSystemFactory(hdfsEnvironment),
                 new NamenodeStats(),
                 hdfsEnvironment,
                 new BoundedExecutor(executor, config.getMaxSplitIteratorThreads()),
@@ -259,8 +261,7 @@ public abstract class AbstractTestHiveFileSystem
                 config,
                 getDefaultHivePageSourceFactories(hdfsEnvironment, config),
                 getDefaultHiveRecordCursorProviders(config, hdfsEnvironment),
-                new GenericHiveRecordCursorProvider(hdfsEnvironment, config),
-                Optional.empty());
+                new GenericHiveRecordCursorProvider(hdfsEnvironment, config));
 
         onSetupComplete();
     }

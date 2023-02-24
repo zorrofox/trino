@@ -20,6 +20,7 @@ import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.trino.filesystem.hdfs.HdfsFileSystemFactory;
 import io.trino.operator.GroupByHashPageIndexerFactory;
+import io.trino.plugin.deltalake.transactionlog.ProtocolEntry;
 import io.trino.plugin.hive.HiveTransactionHandle;
 import io.trino.plugin.hive.NodeVersion;
 import io.trino.spi.Page;
@@ -52,6 +53,8 @@ import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
 import static io.trino.plugin.deltalake.DeltaLakeColumnType.REGULAR;
+import static io.trino.plugin.deltalake.DeltaLakeMetadata.MIN_READER_VERSION;
+import static io.trino.plugin.deltalake.DeltaLakeMetadata.MIN_WRITER_VERSION;
 import static io.trino.plugin.deltalake.DeltaTestingConnectorSession.SESSION;
 import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -158,12 +161,13 @@ public class TestDeltaLakePageSink
                 outputPath.toString(),
                 Optional.of(deltaLakeConfig.getDefaultCheckpointWritingInterval()),
                 true,
-                Optional.empty());
+                Optional.empty(),
+                Optional.of(false),
+                new ProtocolEntry(MIN_READER_VERSION, MIN_WRITER_VERSION));
 
         DeltaLakePageSinkProvider provider = new DeltaLakePageSinkProvider(
                 new GroupByHashPageIndexerFactory(new JoinCompiler(new TypeOperators()), new BlockTypeOperators()),
                 new HdfsFileSystemFactory(HDFS_ENVIRONMENT),
-                HDFS_ENVIRONMENT,
                 JsonCodec.jsonCodec(DataFileInfo.class),
                 JsonCodec.jsonCodec(DeltaLakeMergeResult.class),
                 stats,

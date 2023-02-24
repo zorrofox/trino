@@ -972,22 +972,6 @@ public final class MetadataManager
     }
 
     @Override
-    public ColumnHandle getDeleteRowIdColumnHandle(Session session, TableHandle tableHandle)
-    {
-        CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
-        ConnectorMetadata metadata = getMetadata(session, catalogHandle);
-        return metadata.getDeleteRowIdColumnHandle(session.toConnectorSession(catalogHandle), tableHandle.getConnectorHandle());
-    }
-
-    @Override
-    public ColumnHandle getUpdateRowIdColumnHandle(Session session, TableHandle tableHandle, List<ColumnHandle> updatedColumns)
-    {
-        CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
-        ConnectorMetadata metadata = getMetadata(session, catalogHandle);
-        return metadata.getUpdateRowIdColumnHandle(session.toConnectorSession(catalogHandle), tableHandle.getConnectorHandle(), updatedColumns);
-    }
-
-    @Override
     public ColumnHandle getMergeRowIdColumnHandle(Session session, TableHandle tableHandle)
     {
         CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
@@ -1026,40 +1010,6 @@ public final class MetadataManager
         ConnectorSession connectorSession = session.toConnectorSession(catalogHandle);
 
         return metadata.executeDelete(connectorSession, table.getConnectorHandle());
-    }
-
-    @Override
-    public TableHandle beginDelete(Session session, TableHandle tableHandle)
-    {
-        CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
-        ConnectorMetadata metadata = getMetadataForWrite(session, catalogHandle);
-        ConnectorTableHandle newHandle = metadata.beginDelete(session.toConnectorSession(catalogHandle), tableHandle.getConnectorHandle(), getRetryPolicy(session).getRetryMode());
-        return new TableHandle(tableHandle.getCatalogHandle(), newHandle, tableHandle.getTransaction());
-    }
-
-    @Override
-    public void finishDelete(Session session, TableHandle tableHandle, Collection<Slice> fragments)
-    {
-        CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
-        ConnectorMetadata metadata = getMetadata(session, catalogHandle);
-        metadata.finishDelete(session.toConnectorSession(catalogHandle), tableHandle.getConnectorHandle(), fragments);
-    }
-
-    @Override
-    public TableHandle beginUpdate(Session session, TableHandle tableHandle, List<ColumnHandle> updatedColumns)
-    {
-        CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
-        ConnectorMetadata metadata = getMetadataForWrite(session, catalogHandle);
-        ConnectorTableHandle newHandle = metadata.beginUpdate(session.toConnectorSession(catalogHandle), tableHandle.getConnectorHandle(), updatedColumns, getRetryPolicy(session).getRetryMode());
-        return new TableHandle(tableHandle.getCatalogHandle(), newHandle, tableHandle.getTransaction());
-    }
-
-    @Override
-    public void finishUpdate(Session session, TableHandle tableHandle, Collection<Slice> fragments)
-    {
-        CatalogHandle catalogHandle = tableHandle.getCatalogHandle();
-        ConnectorMetadata metadata = getMetadata(session, catalogHandle);
-        metadata.finishUpdate(session.toConnectorSession(catalogHandle), tableHandle.getConnectorHandle(), fragments);
     }
 
     @Override
@@ -2108,8 +2058,7 @@ public final class MetadataManager
             });
         }
         catch (UncheckedExecutionException e) {
-            if (e.getCause() instanceof TrinoException) {
-                TrinoException cause = (TrinoException) e.getCause();
+            if (e.getCause() instanceof TrinoException cause) {
                 if (cause.getErrorCode().getCode() == FUNCTION_NOT_FOUND.toErrorCode().getCode()) {
                     throw new OperatorNotFoundException(operatorType, argumentTypes, cause);
                 }
@@ -2170,8 +2119,7 @@ public final class MetadataManager
             });
         }
         catch (UncheckedExecutionException e) {
-            if (e.getCause() instanceof TrinoException) {
-                TrinoException cause = (TrinoException) e.getCause();
+            if (e.getCause() instanceof TrinoException cause) {
                 if (cause.getErrorCode().getCode() == FUNCTION_IMPLEMENTATION_MISSING.toErrorCode().getCode()) {
                     throw new OperatorNotFoundException(operatorType, ImmutableList.of(fromType), toType.getTypeSignature(), cause);
                 }

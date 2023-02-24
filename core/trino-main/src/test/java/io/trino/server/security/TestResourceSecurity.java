@@ -294,7 +294,8 @@ public class TestResourceSecurity
                     .headers(Headers.of("Authorization", Credentials.basic(TEST_USER_LOGIN, "wrong_password")))
                     .build();
             try (Response response = client.newCall(request).execute()) {
-                assertThat(response.message()).isEqualTo("Access Denied: Invalid credentials | Access Denied: Invalid credentials2");
+                assertThat(requireNonNull(response.body()).string())
+                        .isEqualTo("Access Denied: Invalid credentials | Access Denied: Invalid credentials2");
             }
         }
     }
@@ -783,7 +784,7 @@ public class TestResourceSecurity
                                 .put("web-ui.enabled", "true")
                                 .put("http-server.authentication.type", "oauth2")
                                 .putAll(getOAuth2Properties(tokenServer))
-                                .put("http-server.authentication.oauth2.groups-field", GROUPS_CLAIM)
+                                .put("deprecated.http-server.authentication.oauth2.groups-field", GROUPS_CLAIM)
                                 .buildOrThrow())
                         .setAdditionalModule(oauth2Module(tokenServer))
                         .build()) {

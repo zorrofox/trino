@@ -92,25 +92,7 @@ public class TestIcebergGlueCatalogConnectorSmokeTest
         getQueryRunner().execute("DROP SCHEMA IF EXISTS " + schemaName);
 
         // DROP TABLES should clean up any files, but clear the directory manually to be safe
-        AmazonS3 s3 = AmazonS3ClientBuilder.standard().build();
-
-        ListObjectsV2Request listObjectsRequest = new ListObjectsV2Request()
-                .withBucketName(bucketName)
-                .withPrefix(schemaPath());
-        List<DeleteObjectsRequest.KeyVersion> keysToDelete = getPaginatedResults(
-                s3::listObjectsV2,
-                listObjectsRequest,
-                ListObjectsV2Request::setContinuationToken,
-                ListObjectsV2Result::getNextContinuationToken,
-                new AwsApiCallStats())
-                .map(ListObjectsV2Result::getObjectSummaries)
-                .flatMap(objectSummaries -> objectSummaries.stream().map(S3ObjectSummary::getKey))
-                .map(DeleteObjectsRequest.KeyVersion::new)
-                .collect(toImmutableList());
-
-        if (!keysToDelete.isEmpty()) {
-            s3.deleteObjects(new DeleteObjectsRequest(bucketName).withKeys(keysToDelete));
-        }
+        deleteDirectory(schemaPath());
     }
 
     @Test
@@ -217,8 +199,47 @@ public class TestIcebergGlueCatalogConnectorSmokeTest
                 .getParameters().get("metadata_location");
     }
 
-    private String schemaPath()
+    @Override
+    protected void deleteDirectory(String location)
+    {
+        AmazonS3 s3 = AmazonS3ClientBuilder.standard().build();
+
+        ListObjectsV2Request listObjectsRequest = new ListObjectsV2Request()
+                .withBucketName(bucketName)
+                .withPrefix(location);
+        List<DeleteObjectsRequest.KeyVersion> keysToDelete = getPaginatedResults(
+                s3::listObjectsV2,
+                listObjectsRequest,
+                ListObjectsV2Request::setContinuationToken,
+                ListObjectsV2Result::getNextContinuationToken,
+                new AwsApiCallStats())
+                .map(ListObjectsV2Result::getObjectSummaries)
+                .flatMap(objectSummaries -> objectSummaries.stream().map(S3ObjectSummary::getKey))
+                .map(DeleteObjectsRequest.KeyVersion::new)
+                .collect(toImmutableList());
+
+        if (!keysToDelete.isEmpty()) {
+            s3.deleteObjects(new DeleteObjectsRequest(bucketName).withKeys(keysToDelete));
+        }
+        assertThat(s3.listObjects(bucketName, location).getObjectSummaries()).isEmpty();
+    }
+
+    @Override
+    protected String schemaPath()
     {
         return format("s3://%s/%s", bucketName, schemaName);
+    }
+
+    @Override
+    protected boolean locationExists(String location)
+    {
+        String prefix = "s3://" + bucketName + "/";
+        AmazonS3 s3 = AmazonS3ClientBuilder.standard().build();
+        ListObjectsV2Request request = new ListObjectsV2Request()
+                .withBucketName(bucketName)
+                .withPrefix(location.substring(prefix.length()))
+                .withMaxKeys(1);
+        return !s3.listObjectsV2(request)
+                .getObjectSummaries().isEmpty();
     }
 }

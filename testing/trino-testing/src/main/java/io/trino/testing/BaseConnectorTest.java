@@ -164,7 +164,14 @@ public abstract class BaseConnectorTest
     private final ConcurrentMap<String, Function<ConnectorSession, List<String>>> mockTableListings = new ConcurrentHashMap<>();
 
     @BeforeClass
-    public void addMockCatalog()
+    public void initMockCatalog()
+    {
+        QueryRunner queryRunner = getQueryRunner();
+        queryRunner.installPlugin(buildMockConnectorPlugin());
+        queryRunner.createCatalog("mock_dynamic_listing", "mock", Map.of());
+    }
+
+    protected MockConnectorPlugin buildMockConnectorPlugin()
     {
         MockConnectorFactory connectorFactory = MockConnectorFactory.builder()
                 .withListSchemaNames(session -> ImmutableList.copyOf(mockTableListings.keySet()))
@@ -177,9 +184,7 @@ public abstract class BaseConnectorTest
                             .apply(session);
                 })
                 .build();
-        QueryRunner queryRunner = getQueryRunner();
-        queryRunner.installPlugin(new MockConnectorPlugin(connectorFactory));
-        queryRunner.createCatalog("mock_dynamic_listing", "mock", Map.of());
+        return new MockConnectorPlugin(connectorFactory);
     }
 
     /**
@@ -702,7 +707,7 @@ public abstract class BaseConnectorTest
     /**
      * Test interactions between optimizer (including CBO), scheduling and connector metadata APIs.
      */
-    @Test(timeOut = 300_000, dataProvider = "joinDistributionTypes")
+    @Test(dataProvider = "joinDistributionTypes")
     public void testJoinWithEmptySides(JoinDistributionType joinDistributionType)
     {
         Session session = noJoinReordering(joinDistributionType);
@@ -773,6 +778,14 @@ public abstract class BaseConnectorTest
                 .build();
         MaterializedResult actualColumns = computeActual("DESCRIBE orders");
         assertEquals(actualColumns, expectedColumns);
+    }
+
+    @Test
+    public void testShowInformationSchemaTables()
+    {
+        assertThat(query("SHOW TABLES FROM information_schema"))
+                .skippingTypesCheck()
+                .containsAll("VALUES 'applicable_roles', 'columns', 'enabled_roles', 'roles', 'schemata', 'table_privileges', 'tables', 'views'");
     }
 
     @Test
@@ -1218,6 +1231,28 @@ public abstract class BaseConnectorTest
 
                     assertUpdate("DROP MATERIALIZED VIEW " + viewName);
                 });
+    }
+
+    @Test(dataProviderClass = DataProviders.class, dataProvider = "trueFalse")
+    public void testMaterializedViewBaseTableGone(boolean initialized)
+    {
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_MATERIALIZED_VIEW));
+
+        String catalog = getSession().getCatalog().orElseThrow();
+        String schema = getSession().getSchema().orElseThrow();
+        String viewName = "mv_base_table_missing_" + randomNameSuffix();
+        String baseTable = "mv_base_table_missing_the_table_" + randomNameSuffix();
+
+        assertUpdate("CREATE TABLE " + baseTable + " AS SELECT 1 a", 1);
+        assertUpdate("CREATE MATERIALIZED VIEW " + viewName + " AS SELECT * FROM " + baseTable);
+        if (initialized) {
+            assertUpdate("REFRESH MATERIALIZED VIEW " + viewName, 1);
+        }
+        assertUpdate("DROP TABLE " + baseTable);
+        assertQueryFails(
+                "TABLE " + viewName,
+                "line 1:1: Failed analyzing stored view '%1$s\\.%2$s\\.%3$s': line 3:3: Table '%1$s\\.%2$s\\.%4$s' does not exist".formatted(catalog, schema, viewName, baseTable));
+        assertUpdate("DROP MATERIALIZED VIEW " + viewName);
     }
 
     @Test
@@ -2213,12 +2248,18 @@ public abstract class BaseConnectorTest
         skipTestUnless(hasBehavior(SUPPORTS_SET_COLUMN_TYPE) && hasBehavior(SUPPORTS_CREATE_TABLE_WITH_DATA));
 
         try (TestTable table = new TestTable(getQueryRunner()::execute, "test_set_column_type_", " AS SELECT CAST(" + setup.sourceValueLiteral + " AS " + setup.sourceColumnType + ") AS col")) {
-            assertUpdate("ALTER TABLE " + table.getName() + " ALTER COLUMN col SET DATA TYPE " + setup.newColumnType);
+            Runnable setColumnType = () -> assertUpdate("ALTER TABLE " + table.getName() + " ALTER COLUMN col SET DATA TYPE " + setup.newColumnType);
+            if (setup.unsupportedType) {
+                assertThatThrownBy(setColumnType::run)
+                        .satisfies(this::verifySetColumnTypeFailurePermissible);
+                return;
+            }
+            setColumnType.run();
 
             assertEquals(getColumnType(table.getName(), "col"), setup.newColumnType);
             assertThat(query("SELECT * FROM " + table.getName()))
                     .skippingTypesCheck()
-                    .matches("VALUES " + setup.newValueLiteral);
+                    .matches("SELECT " + setup.newValueLiteral);
         }
         catch (Exception e) {
             verifyUnsupportedTypeException(e, setup.sourceColumnType);
@@ -2243,37 +2284,70 @@ public abstract class BaseConnectorTest
     private List<SetColumnTypeSetup> setColumnTypeSetupData()
     {
         return ImmutableList.<SetColumnTypeSetup>builder()
-                .add(new SetColumnTypeSetup("tinyint", "tinyint '127'", "smallint", "smallint '127'"))
-                .add(new SetColumnTypeSetup("smallint", "smallint '32767'", "integer", "32767"))
-                .add(new SetColumnTypeSetup("integer", "2147483647", "bigint", "bigint '2147483647'"))
-                .add(new SetColumnTypeSetup("bigint", "bigint '-2147483648'", "integer", "-2147483648"))
-                .add(new SetColumnTypeSetup("decimal(5,3)", "12.345", "decimal(10,3)", "12.345")) // short decimal -> short decimal
-                .add(new SetColumnTypeSetup("decimal(28,3)", "12.345", "decimal(38,3)", "12.345")) // long decimal -> long decimal
-                .add(new SetColumnTypeSetup("decimal(5,3)", "12.345", "decimal(38,3)", "12.345")) // short decimal -> long decimal
-                .add(new SetColumnTypeSetup("decimal(5,3)", "12.340", "decimal(5,2)", "12.34"))
-                .add(new SetColumnTypeSetup("decimal(5,3)", "12.349", "decimal(5,2)", "12.35"))
-                .add(new SetColumnTypeSetup("time(3)", "time '15:03:00.123'", "time(6)", "time '15:03:00.123000'"))
-                .add(new SetColumnTypeSetup("time(6)", "time '15:03:00.123000'", "time(3)", "time '15:03:00.123'"))
-                .add(new SetColumnTypeSetup("time(6)", "time '15:03:00.123999'", "time(3)", "time '15:03:00.124'"))
-                .add(new SetColumnTypeSetup("timestamp(3)", "timestamp '2020-02-12 15:03:00.123'", "timestamp(6)", "timestamp '2020-02-12 15:03:00.123000'"))
-                .add(new SetColumnTypeSetup("timestamp(6)", "timestamp '2020-02-12 15:03:00.123000'", "timestamp(3)", "timestamp '2020-02-12 15:03:00.123'"))
-                .add(new SetColumnTypeSetup("timestamp(6)", "timestamp '2020-02-12 15:03:00.123999'", "timestamp(3)", "timestamp '2020-02-12 15:03:00.124'"))
-                .add(new SetColumnTypeSetup("timestamp(3) with time zone", "timestamp '2020-02-12 15:03:00.123 +01:00'", "timestamp(6) with time zone", "timestamp '2020-02-12 15:03:00.123000 +01:00'"))
-                .add(new SetColumnTypeSetup("varchar(100)", "'shorten-varchar'", "varchar(50)", "'shorten-varchar'"))
-                .add(new SetColumnTypeSetup("char(100)", "'shorten-char'", "char(50)", "cast('shorten-char' as char(50))"))
-                .add(new SetColumnTypeSetup("char(100)", "'char-to-varchar'", "varchar", "'char-to-varchar'"))
-                .add(new SetColumnTypeSetup("varchar", "'varchar-to-char'", "char(100)", "cast('varchar-to-char' as char(100))"))
+                .add(new SetColumnTypeSetup("tinyint", "TINYINT '127'", "smallint"))
+                .add(new SetColumnTypeSetup("smallint", "SMALLINT '32767'", "integer"))
+                .add(new SetColumnTypeSetup("integer", "2147483647", "bigint"))
+                .add(new SetColumnTypeSetup("bigint", "BIGINT '-2147483648'", "integer"))
+                .add(new SetColumnTypeSetup("real", "REAL '10.3'", "double"))
+                .add(new SetColumnTypeSetup("real", "REAL 'NaN'", "double"))
+                .add(new SetColumnTypeSetup("decimal(5,3)", "12.345", "decimal(10,3)")) // short decimal -> short decimal
+                .add(new SetColumnTypeSetup("decimal(28,3)", "12.345", "decimal(38,3)")) // long decimal -> long decimal
+                .add(new SetColumnTypeSetup("decimal(5,3)", "12.345", "decimal(38,3)")) // short decimal -> long decimal
+                .add(new SetColumnTypeSetup("decimal(5,3)", "12.340", "decimal(5,2)"))
+                .add(new SetColumnTypeSetup("decimal(5,3)", "12.349", "decimal(5,2)"))
+                .add(new SetColumnTypeSetup("time(3)", "TIME '15:03:00.123'", "time(6)"))
+                .add(new SetColumnTypeSetup("time(6)", "TIME '15:03:00.123000'", "time(3)"))
+                .add(new SetColumnTypeSetup("time(6)", "TIME '15:03:00.123999'", "time(3)"))
+                .add(new SetColumnTypeSetup("timestamp(3)", "TIMESTAMP '2020-02-12 15:03:00.123'", "timestamp(6)"))
+                .add(new SetColumnTypeSetup("timestamp(6)", "TIMESTAMP '2020-02-12 15:03:00.123000'", "timestamp(3)"))
+                .add(new SetColumnTypeSetup("timestamp(6)", "TIMESTAMP '2020-02-12 15:03:00.123999'", "timestamp(3)"))
+                .add(new SetColumnTypeSetup("timestamp(3) with time zone", "TIMESTAMP '2020-02-12 15:03:00.123 +01:00'", "timestamp(6) with time zone"))
+                .add(new SetColumnTypeSetup("varchar(100)", "'shorten-varchar'", "varchar(50)"))
+                .add(new SetColumnTypeSetup("char(25)", "'shorten-char'", "char(20)"))
+                .add(new SetColumnTypeSetup("char(20)", "'char-to-varchar'", "varchar"))
+                .add(new SetColumnTypeSetup("varchar", "'varchar-to-char'", "char(20)"))
+                .add(new SetColumnTypeSetup("array(integer)", "array[1]", "array(bigint)"))
+                .add(new SetColumnTypeSetup("row(x integer)", "row(1)", "row(x bigint)"))
+                .add(new SetColumnTypeSetup("row(x integer)", "row(1)", "row(y integer)", "cast(row(NULL) as row(x integer))")) // rename a field
+                .add(new SetColumnTypeSetup("row(x integer, y integer)", "row(1, 2)", "row(x integer, z integer)", "cast(row(1, NULL) as row(x integer, z integer))")) // rename a field, but not all fields
+                .add(new SetColumnTypeSetup("row(x integer)", "row(1)", "row(x integer, y integer)", "cast(row(1, NULL) as row(x integer, y integer))")) // add a new field
+                .add(new SetColumnTypeSetup("row(x integer, y integer)", "row(1, 2)", "row(x integer)", "cast(row(1) as row(x integer))")) // remove an existing field
+                .add(new SetColumnTypeSetup("row(x integer, y integer)", "row(1, 2)", "row(y integer, x integer)", "cast(row(2, 1) as row(y integer, x integer))")) // reorder fields
+                .add(new SetColumnTypeSetup("row(x integer, y integer)", "row(1, 2)", "row(z integer, y integer, x integer)", "cast(row(null, 2, 1) as row(z integer, y integer, x integer))")) // reorder fields with a new field
+                .add(new SetColumnTypeSetup("row(x row(nested integer))", "row(row(1))", "row(x row(nested bigint))", "cast(row(row(1)) as row(x row(nested bigint)))")) // update a nested field
+                .add(new SetColumnTypeSetup("row(x row(a integer, b integer))", "row(row(1, 2))", "row(x row(b integer, a integer))", "cast(row(row(2, 1)) as row(x row(b integer, a integer)))")) // reorder a nested field
                 .build();
     }
 
-    public record SetColumnTypeSetup(String sourceColumnType, String sourceValueLiteral, String newColumnType, String newValueLiteral)
+    public record SetColumnTypeSetup(String sourceColumnType, String sourceValueLiteral, String newColumnType, String newValueLiteral, boolean unsupportedType)
     {
+        public SetColumnTypeSetup(String sourceColumnType, String sourceValueLiteral, String newColumnType)
+        {
+            this(sourceColumnType, sourceValueLiteral, newColumnType, "CAST(CAST(%s AS %s) AS %s)".formatted(sourceValueLiteral, sourceColumnType, newColumnType));
+        }
+
+        public SetColumnTypeSetup(String sourceColumnType, String sourceValueLiteral, String newColumnType, String newValueLiteral)
+        {
+            this(sourceColumnType, sourceValueLiteral, newColumnType, newValueLiteral, false);
+        }
+
         public SetColumnTypeSetup
         {
             requireNonNull(sourceColumnType, "sourceColumnType is null");
             requireNonNull(sourceValueLiteral, "sourceValueLiteral is null");
             requireNonNull(newColumnType, "newColumnType is null");
             requireNonNull(newValueLiteral, "newValueLiteral is null");
+        }
+
+        public SetColumnTypeSetup withNewValueLiteral(String newValueLiteral)
+        {
+            checkState(!unsupportedType);
+            return new SetColumnTypeSetup(sourceColumnType, sourceValueLiteral, newColumnType, newValueLiteral, unsupportedType);
+        }
+
+        public SetColumnTypeSetup asUnsupported()
+        {
+            return new SetColumnTypeSetup(sourceColumnType, sourceValueLiteral, newColumnType, newValueLiteral, true);
         }
     }
 
@@ -2295,7 +2369,7 @@ public abstract class BaseConnectorTest
     {
         skipTestUnless(hasBehavior(SUPPORTS_SET_COLUMN_TYPE) && hasBehavior(SUPPORTS_CREATE_TABLE_WITH_COLUMN_COMMENT));
 
-        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_set_column_type_comment_", "(col int COMMENT 'test')")) {
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_set_column_type_comment_", "(col int COMMENT 'test comment')")) {
             assertEquals(getColumnComment(table.getName(), "col"), "test comment");
 
             assertUpdate("ALTER TABLE " + table.getName() + " ALTER COLUMN col SET DATA TYPE bigint");
@@ -2522,6 +2596,7 @@ public abstract class BaseConnectorTest
         assertThatThrownBy(() -> assertUpdate("ALTER TABLE " + sourceTableName + " RENAME TO " + invalidTargetTableName))
                 .satisfies(this::verifyTableNameLengthFailurePermissible);
         assertFalse(getQueryRunner().tableExists(getSession(), invalidTargetTableName));
+        assertUpdate("DROP TABLE " + sourceTableName);
     }
 
     protected OptionalInt maxTableNameLength()
@@ -2709,63 +2784,63 @@ public abstract class BaseConnectorTest
         assertUpdate("DROP TABLE " + tableName);
 
         // Some connectors support CREATE TABLE AS but not the ordinary CREATE TABLE. Let's test CTAS IF NOT EXISTS with a table that is guaranteed to exist.
-        assertUpdate("CREATE TABLE IF NOT EXISTS nation AS SELECT custkey, acctbal FROM customer", 0);
+        assertUpdate("CREATE TABLE IF NOT EXISTS nation AS SELECT nationkey, regionkey FROM nation", 0);
         assertTableColumnNames("nation", "nationkey", "name", "regionkey", "comment");
 
         assertCreateTableAsSelect(
-                "SELECT custkey, address, acctbal FROM customer",
-                "SELECT count(*) FROM customer");
+                "SELECT nationkey, name, regionkey FROM nation",
+                "SELECT count(*) FROM nation");
 
         assertCreateTableAsSelect(
                 "SELECT mktsegment, sum(acctbal) x FROM customer GROUP BY mktsegment",
                 "SELECT count(DISTINCT mktsegment) FROM customer");
 
         assertCreateTableAsSelect(
-                "SELECT count(*) x FROM customer JOIN nation ON customer.nationkey = nation.nationkey",
+                "SELECT count(*) x FROM nation JOIN region ON nation.regionkey = region.regionkey",
                 "SELECT 1");
 
         assertCreateTableAsSelect(
-                "SELECT custkey FROM customer ORDER BY custkey LIMIT 10",
+                "SELECT nationkey FROM nation ORDER BY nationkey LIMIT 10",
                 "SELECT 10");
 
         assertCreateTableAsSelect(
-                "SELECT * FROM customer WITH DATA",
-                "SELECT * FROM customer",
-                "SELECT count(*) FROM customer");
+                "SELECT * FROM nation WITH DATA",
+                "SELECT * FROM nation",
+                "SELECT count(*) FROM nation");
 
         assertCreateTableAsSelect(
-                "SELECT * FROM customer WITH NO DATA",
-                "SELECT * FROM customer LIMIT 0",
+                "SELECT * FROM nation WITH NO DATA",
+                "SELECT * FROM nation LIMIT 0",
                 "SELECT 0");
 
         // Tests for CREATE TABLE with UNION ALL: exercises PushTableWriteThroughUnion optimizer
 
         assertCreateTableAsSelect(
-                "SELECT name, custkey, acctbal FROM customer WHERE custkey % 2 = 0 UNION ALL " +
-                        "SELECT name, custkey, acctbal FROM customer WHERE custkey % 2 = 1",
-                "SELECT name, custkey, acctbal FROM customer",
-                "SELECT count(*) FROM customer");
+                "SELECT name, nationkey, regionkey FROM nation WHERE nationkey % 2 = 0 UNION ALL " +
+                        "SELECT name, nationkey, regionkey FROM nation WHERE nationkey % 2 = 1",
+                "SELECT name, nationkey, regionkey FROM nation",
+                "SELECT count(*) FROM nation");
 
         assertCreateTableAsSelect(
                 Session.builder(getSession()).setSystemProperty("redistribute_writes", "true").build(),
-                "SELECT CAST(custkey AS BIGINT) custkey, acctbal FROM customer UNION ALL " +
-                        "SELECT 1234567890, 1.23",
-                "SELECT custkey, acctbal FROM customer UNION ALL " +
-                        "SELECT 1234567890, 1.23",
-                "SELECT count(*) + 1 FROM customer");
+                "SELECT CAST(nationkey AS BIGINT) nationkey, regionkey FROM nation UNION ALL " +
+                        "SELECT 1234567890, 123",
+                "SELECT nationkey, regionkey FROM nation UNION ALL " +
+                        "SELECT 1234567890, 123",
+                "SELECT count(*) + 1 FROM nation");
 
         assertCreateTableAsSelect(
                 Session.builder(getSession()).setSystemProperty("redistribute_writes", "false").build(),
-                "SELECT CAST(custkey AS BIGINT) custkey, acctbal FROM customer UNION ALL " +
-                        "SELECT 1234567890, 1.23",
-                "SELECT custkey, acctbal FROM customer UNION ALL " +
-                        "SELECT 1234567890, 1.23",
-                "SELECT count(*) + 1 FROM customer");
+                "SELECT CAST(nationkey AS BIGINT) nationkey, regionkey FROM nation UNION ALL " +
+                        "SELECT 1234567890, 123",
+                "SELECT nationkey, regionkey FROM nation UNION ALL " +
+                        "SELECT 1234567890, 123",
+                "SELECT count(*) + 1 FROM nation");
 
         // TODO: BigQuery throws table not found at BigQueryClient.insert if we reuse the same table name
         tableName = "test_ctas" + randomNameSuffix();
-        assertExplainAnalyze("EXPLAIN ANALYZE CREATE TABLE " + tableName + " AS SELECT mktsegment FROM customer");
-        assertQuery("SELECT * from " + tableName, "SELECT mktsegment FROM customer");
+        assertExplainAnalyze("EXPLAIN ANALYZE CREATE TABLE " + tableName + " AS SELECT name FROM nation");
+        assertQuery("SELECT * from " + tableName, "SELECT name FROM nation");
         assertUpdate("DROP TABLE " + tableName);
     }
 
@@ -3577,12 +3652,12 @@ public abstract class BaseConnectorTest
         skipTestUnless(hasBehavior(SUPPORTS_DELETE));
 
         // TODO (https://github.com/trinodb/trino/issues/5901) Use longer table name once Oracle version is updated
-        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete_complex_", "AS SELECT * FROM orders")) {
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete_complex_", "AS SELECT * FROM nation")) {
             // delete half the table, then delete the rest
-            assertUpdate("DELETE FROM " + table.getName() + " WHERE orderkey % 2 = 0", "SELECT count(*) FROM orders WHERE orderkey % 2 = 0");
-            assertQuery("SELECT * FROM " + table.getName(), "SELECT * FROM orders WHERE orderkey % 2 <> 0");
+            assertUpdate("DELETE FROM " + table.getName() + " WHERE nationkey % 2 = 0", "SELECT count(*) FROM nation WHERE nationkey % 2 = 0");
+            assertQuery("SELECT * FROM " + table.getName(), "SELECT * FROM nation WHERE nationkey % 2 <> 0");
 
-            assertUpdate("DELETE FROM " + table.getName(), "SELECT count(*) FROM orders WHERE orderkey % 2 <> 0");
+            assertUpdate("DELETE FROM " + table.getName(), "SELECT count(*) FROM nation WHERE nationkey % 2 <> 0");
             assertQuery("SELECT * FROM " + table.getName(), "SELECT * FROM orders LIMIT 0");
 
             assertUpdate("DELETE FROM " + table.getName() + " WHERE rand() < 0", 0);
@@ -4260,7 +4335,7 @@ public abstract class BaseConnectorTest
         }
         catch (RuntimeException e) {
             if (isColumnNameRejected(e, columnName, delimited)) {
-                // It is OK if give column name is not allowed and is clearly rejected by the connector.
+                // It is OK if given column name is not allowed and is clearly rejected by the connector.
                 return;
             }
             throw e;
@@ -5212,10 +5287,10 @@ public abstract class BaseConnectorTest
         String targetTable = "merge_update_columns_reversed_" + randomNameSuffix();
         assertUpdate(createTableForWrites("CREATE TABLE " + targetTable + " (a, b, c) AS VALUES (1, 2, 3)"), 1);
         assertUpdate("""
-                MERGE INTO %s t USING (VALUES(1)) AS s(a) ON (t.a = s.a)
-                    WHEN MATCHED THEN UPDATE
-                        SET c = 100, b = 42, a = 0
-                """.formatted(targetTable),
+                        MERGE INTO %s t USING (VALUES(1)) AS s(a) ON (t.a = s.a)
+                            WHEN MATCHED THEN UPDATE
+                                SET c = 100, b = 42, a = 0
+                        """.formatted(targetTable),
                 1);
         assertQuery("SELECT * FROM " + targetTable, "VALUES (0, 42, 100)");
 

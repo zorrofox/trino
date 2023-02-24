@@ -36,6 +36,7 @@ import static io.trino.spi.security.AccessDeniedException.denyCatalogAccess;
 import static io.trino.spi.security.AccessDeniedException.denyCommentColumn;
 import static io.trino.spi.security.AccessDeniedException.denyCommentTable;
 import static io.trino.spi.security.AccessDeniedException.denyCommentView;
+import static io.trino.spi.security.AccessDeniedException.denyCreateCatalog;
 import static io.trino.spi.security.AccessDeniedException.denyCreateMaterializedView;
 import static io.trino.spi.security.AccessDeniedException.denyCreateRole;
 import static io.trino.spi.security.AccessDeniedException.denyCreateSchema;
@@ -45,6 +46,7 @@ import static io.trino.spi.security.AccessDeniedException.denyCreateViewWithSele
 import static io.trino.spi.security.AccessDeniedException.denyDeleteTable;
 import static io.trino.spi.security.AccessDeniedException.denyDenySchemaPrivilege;
 import static io.trino.spi.security.AccessDeniedException.denyDenyTablePrivilege;
+import static io.trino.spi.security.AccessDeniedException.denyDropCatalog;
 import static io.trino.spi.security.AccessDeniedException.denyDropColumn;
 import static io.trino.spi.security.AccessDeniedException.denyDropMaterializedView;
 import static io.trino.spi.security.AccessDeniedException.denyDropRole;
@@ -244,6 +246,26 @@ public interface SystemAccessControl
     default void checkCanAccessCatalog(SystemSecurityContext context, String catalogName)
     {
         denyCatalogAccess(catalogName);
+    }
+
+    /**
+     * Check if identity is allowed to create the specified catalog.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    default void checkCanCreateCatalog(SystemSecurityContext context, String catalog)
+    {
+        denyCreateCatalog(catalog);
+    }
+
+    /**
+     * Check if identity is allowed to drop the specified catalog.
+     *
+     * @throws AccessDeniedException if not allowed
+     */
+    default void checkCanDropCatalog(SystemSecurityContext context, String catalog)
+    {
+        denyDropCatalog(catalog);
     }
 
     /**
@@ -877,11 +899,22 @@ public interface SystemAccessControl
     /**
      * Get column masks associated with the given table, column and identity.
      * <p>
-     * Each mask must be a scalar SQL expression of a type coercible to the type of the column being masked. The expression
+     * The mask must be a scalar SQL expression of a type coercible to the type of the column being masked. The expression
      * must be written in terms of columns in the table.
      *
-     * @return the list of masks, or empty list if not applicable
+     * @return the mask if present, or empty if not applicable
      */
+    default Optional<ViewExpression> getColumnMask(SystemSecurityContext context, CatalogSchemaTableName tableName, String columnName, Type type)
+    {
+        List<ViewExpression> masks = getColumnMasks(context, tableName, columnName, type);
+        if (masks.size() > 1) {
+            throw new UnsupportedOperationException("Multiple masks on a single column are no longer supported");
+        }
+
+        return masks.stream().findFirst();
+    }
+
+    @Deprecated
     default List<ViewExpression> getColumnMasks(SystemSecurityContext context, CatalogSchemaTableName tableName, String columnName, Type type)
     {
         return List.of();

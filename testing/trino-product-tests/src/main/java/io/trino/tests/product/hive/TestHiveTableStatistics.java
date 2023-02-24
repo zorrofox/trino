@@ -39,8 +39,8 @@ import static io.trino.tempto.fulfillment.table.hive.tpch.TpchTableDefinitions.N
 import static io.trino.tests.product.hive.AllSimpleTypesTableDefinitions.ALL_HIVE_SIMPLE_TYPES_TEXTFILE;
 import static io.trino.tests.product.hive.HiveTableDefinitions.NATION_PARTITIONED_BY_BIGINT_REGIONKEY;
 import static io.trino.tests.product.hive.HiveTableDefinitions.NATION_PARTITIONED_BY_VARCHAR_REGIONKEY;
-import static io.trino.tests.product.utils.HadoopTestUtils.ERROR_COMMITTING_WRITE_TO_HIVE_ISSUE;
-import static io.trino.tests.product.utils.HadoopTestUtils.ERROR_COMMITTING_WRITE_TO_HIVE_MATCH;
+import static io.trino.tests.product.utils.HadoopTestUtils.RETRYABLE_FAILURES_ISSUES;
+import static io.trino.tests.product.utils.HadoopTestUtils.RETRYABLE_FAILURES_MATCH;
 import static io.trino.tests.product.utils.QueryExecutors.onHive;
 import static io.trino.tests.product.utils.QueryExecutors.onTrino;
 import static java.lang.String.format;
@@ -182,6 +182,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(UnpartitionedNationTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForUnpartitionedTable()
     {
         String tableNameInDatabase = mutableTablesState().get(NATION.getName()).getNameInDatabase();
@@ -200,6 +201,7 @@ public class TestHiveTableStatistics
         // basic analysis
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " COMPUTE STATISTICS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("n_nationkey", null, null, null, null, null, null),
@@ -211,6 +213,7 @@ public class TestHiveTableStatistics
         // column analysis
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("n_nationkey", null, anyOf(19., 25.), 0.0, null, "0", "24"),
@@ -222,6 +225,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(NationPartitionedByBigintTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForTablePartitionedByBigint()
     {
         String tableNameInDatabase = mutableTablesState().get(NATION_PARTITIONED_BY_BIGINT_REGIONKEY.getName()).getNameInDatabase();
@@ -249,6 +253,7 @@ public class TestHiveTableStatistics
         // basic analysis for single partition
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey = \"1\") COMPUTE STATISTICS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, null, null, null, null, null),
@@ -274,6 +279,7 @@ public class TestHiveTableStatistics
         // basic analysis for all partitions
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey) COMPUTE STATISTICS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, null, null, null, null, null),
@@ -299,6 +305,7 @@ public class TestHiveTableStatistics
         // column analysis for single partition
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey = \"1\") COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, 5.0, 0.0, null, "1", "24"),
@@ -324,6 +331,7 @@ public class TestHiveTableStatistics
         // column analysis for all partitions
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey) COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, 5.0, 0.0, null, "1", "24"),
@@ -349,6 +357,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(NationPartitionedByVarcharTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForTablePartitionedByVarchar()
     {
         String tableNameInDatabase = mutableTablesState().get(NATION_PARTITIONED_BY_VARCHAR_REGIONKEY.getName()).getNameInDatabase();
@@ -376,6 +385,7 @@ public class TestHiveTableStatistics
         // basic analysis for single partition
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey = \"AMERICA\") COMPUTE STATISTICS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, null, null, null, null, null),
@@ -401,6 +411,7 @@ public class TestHiveTableStatistics
         // basic analysis for all partitions
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey) COMPUTE STATISTICS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, null, null, null, null, null),
@@ -426,6 +437,7 @@ public class TestHiveTableStatistics
         // column analysis for single partition
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey = \"AMERICA\") COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, 5.0, 0.0, null, "1", "24"),
@@ -451,6 +463,7 @@ public class TestHiveTableStatistics
         // column analysis for all partitions
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " PARTITION (p_regionkey) COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery(showStatsWholeTable)).containsOnly(
                 row("p_nationkey", null, 5.0, 0.0, null, "1", "24"),
@@ -477,6 +490,7 @@ public class TestHiveTableStatistics
     // This covers also stats calculation for unpartitioned table
     @Test
     @Requires(AllTypesTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForAllDataTypes()
     {
         String tableNameInDatabase = mutableTablesState().get(ALL_TYPES_TABLE_NAME).getNameInDatabase();
@@ -502,6 +516,7 @@ public class TestHiveTableStatistics
                 row(null, null, null, null, 2.0, null, null));
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         // SHOW STATS FORMAT: column_name, data_size, distinct_values_count, nulls_fraction, row_count
         assertThat(onTrino().executeQuery("SHOW STATS FOR " + tableNameInDatabase)).containsOnly(
@@ -525,6 +540,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(AllTypesTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForAllDataTypesNoData()
     {
         String tableNameInDatabase = mutableTablesState().get(EMPTY_ALL_TYPES_TABLE_NAME).getNameInDatabase();
@@ -550,6 +566,7 @@ public class TestHiveTableStatistics
                 row(null, null, null, null, 0.0, null, null));
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery("SHOW STATS FOR " + tableNameInDatabase)).containsOnly(
                 row("c_tinyint", 0.0, 0.0, 1.0, null, null, null),
@@ -572,6 +589,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(AllTypesTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForAllDataTypesOnlyNulls()
     {
         String tableNameInDatabase = mutableTablesState().get(EMPTY_ALL_TYPES_TABLE_NAME).getNameInDatabase();
@@ -598,6 +616,7 @@ public class TestHiveTableStatistics
                 row(null, null, null, null, 1.0, null, null));
 
         onHive().executeQuery("ANALYZE TABLE " + tableNameInDatabase + " COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery("SHOW STATS FOR " + tableNameInDatabase)).containsOnly(
                 row("c_tinyint", 0.0, 0.0, 1.0, null, null, null),
@@ -620,6 +639,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(UnpartitionedNationTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testStatisticsForSkewedTable()
     {
         String tableName = "test_hive_skewed_table_statistics";
@@ -633,6 +653,7 @@ public class TestHiveTableStatistics
                 row(null, null, null, null, 2.0, null, null));
 
         onHive().executeQuery("ANALYZE TABLE " + tableName + " COMPUTE STATISTICS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
         assertThat(onTrino().executeQuery("SHOW STATS FOR " + tableName)).containsOnly(
                 row("c_string", null, null, null, null, null, null),
@@ -640,6 +661,7 @@ public class TestHiveTableStatistics
                 row(null, null, null, null, 2.0, null, null));
 
         onHive().executeQuery("ANALYZE TABLE " + tableName + " COMPUTE STATISTICS FOR COLUMNS");
+        onTrino().executeQuery("CALL system.flush_metadata_cache()");
         assertThat(onTrino().executeQuery("SHOW STATS FOR " + tableName)).containsOnly(
                 row("c_string", 4.0, 1.0, 0.0, null, null, null),
                 row("c_int", null, 2.0, 0.0, null, "1", "2"),
@@ -648,6 +670,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(UnpartitionedNationTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testAnalyzesForSkewedTable()
     {
         String tableName = "test_analyze_skewed_table";
@@ -941,6 +964,7 @@ public class TestHiveTableStatistics
 
     @Test
     @Requires(AllTypesTable.class)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testAnalyzeForAllDataTypesOnlyNulls()
     {
         String tableNameInDatabase = mutableTablesState().get(EMPTY_ALL_TYPES_TABLE_NAME).getNameInDatabase();
@@ -1377,7 +1401,7 @@ public class TestHiveTableStatistics
     }
 
     @Test
-    @Flaky(issue = ERROR_COMMITTING_WRITE_TO_HIVE_ISSUE, match = ERROR_COMMITTING_WRITE_TO_HIVE_MATCH)
+    @Flaky(issue = RETRYABLE_FAILURES_ISSUES, match = RETRYABLE_FAILURES_MATCH)
     public void testMixedHiveAndPrestoStatistics()
     {
         String tableName = "test_mixed_hive_and_presto_statistics";
@@ -1413,6 +1437,7 @@ public class TestHiveTableStatistics
             onTrino().executeQuery(format("ANALYZE %s WITH (partitions = ARRAY[ARRAY['1']])", tableName));
             onHive().executeQuery(format("ANALYZE TABLE %s PARTITION (p = \"2\") COMPUTE STATISTICS", tableName));
             onHive().executeQuery(format("ANALYZE TABLE %s PARTITION (p = \"2\") COMPUTE STATISTICS FOR COLUMNS", tableName));
+            onTrino().executeQuery("CALL system.flush_metadata_cache()");
 
             // we can get stats for individual partitions
             assertThat(onTrino().executeQuery(showStatsPartitionOne)).containsOnly(

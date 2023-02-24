@@ -84,12 +84,14 @@ import static io.trino.plugin.hive.parquet.ParquetPageSourceFactory.createParque
 import static io.trino.plugin.hive.parquet.ParquetPageSourceFactory.getColumnIndexStore;
 import static io.trino.plugin.hive.parquet.ParquetPageSourceFactory.getParquetMessageType;
 import static io.trino.plugin.hive.parquet.ParquetPageSourceFactory.getParquetTupleDomain;
+import static io.trino.plugin.hive.util.HiveUtil.makePartName;
 import static io.trino.plugin.hudi.HudiErrorCode.HUDI_BAD_DATA;
 import static io.trino.plugin.hudi.HudiErrorCode.HUDI_CANNOT_OPEN_SPLIT;
 import static io.trino.plugin.hudi.HudiErrorCode.HUDI_CURSOR_ERROR;
 import static io.trino.plugin.hudi.HudiErrorCode.HUDI_INVALID_PARTITION_VALUE;
 import static io.trino.plugin.hudi.HudiErrorCode.HUDI_MISSING_DATA;
 import static io.trino.plugin.hudi.HudiErrorCode.HUDI_UNSUPPORTED_FILE_FORMAT;
+import static io.trino.plugin.hudi.HudiSessionProperties.isParquetOptimizedNestedReaderEnabled;
 import static io.trino.plugin.hudi.HudiSessionProperties.isParquetOptimizedReaderEnabled;
 import static io.trino.plugin.hudi.HudiSessionProperties.shouldUseParquetColumnNames;
 import static io.trino.plugin.hudi.HudiUtil.getHudiFileFormat;
@@ -116,7 +118,6 @@ import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toUnmodifiableList;
-import static org.apache.hadoop.hive.common.FileUtils.makePartName;
 
 public class HudiPageSourceProvider
         implements ConnectorPageSourceProvider
@@ -241,7 +242,8 @@ public class HudiPageSourceProvider
                     dataSource,
                     timeZone,
                     newSimpleAggregatedMemoryContext(),
-                    options.withBatchColumnReaders(isParquetOptimizedReaderEnabled(session)),
+                    options.withBatchColumnReaders(isParquetOptimizedReaderEnabled(session))
+                            .withBatchNestedColumnReaders(isParquetOptimizedNestedReaderEnabled(session)),
                     exception -> handleException(dataSourceId, exception),
                     Optional.of(parquetPredicate),
                     columnIndexes.build(),
